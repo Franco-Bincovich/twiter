@@ -40,6 +40,17 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
     `GET /consultas/{job_id}` (polling). Registrado en `main.py`.
   - `tests/test_job_service.py`: 4 casos (jurídica→PENDING, física→
     PERSONA_FISICA_NOT_ALLOWED, PENDING→DONE con stub, inexistente→JOB_NOT_FOUND).
+- Maquinaria de caché con TTL para respuestas de fuentes externas (sin fuentes
+  conectadas todavía, solo el esqueleto; el cableado se hace al enchufar BCRA):
+  - `repositories/cache_repo.py`: interfaz abstracta `CacheRepository`
+    (`get`/`set`/`delete` async) + `InMemoryCacheRepository` (dict en memoria,
+    thread-safe con `asyncio.Lock`, expiración lazy medida con `time.monotonic()`).
+    Temporal hasta conectar Supabase con la misma interfaz.
+  - `services/cache_service.py`: capa fina sobre el repo. `construir_key`
+    (formato `"{fuente}:{cuit}"`), `obtener_cacheado`, `guardar_en_cache` y los
+    TTL por defecto `TTL_BCRA`/`TTL_ARCA` (24h) y `TTL_BORA` (7 días).
+  - `tests/test_cache_service.py`: 5 casos (set+get, key inexistente→None,
+    entrada expirada→None, formato de key, delete remueve la entrada).
 
 ### Fixed
 

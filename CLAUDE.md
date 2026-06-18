@@ -71,8 +71,15 @@ Reglas no negociables:
   `services/job_service.py` (pipeline de fuentes como STUB), `controllers/job_controller.py`,
   `routers/job_router.py` (`POST /consultas`, `GET /consultas/{job_id}`) + tests
   (4/4). Las fuentes reales (BCRA/ARCA) se enchufan en `_ejecutar_pipeline`.
+- Maquinaria de caché con TTL (esqueleto, sin fuentes ni Supabase):
+  `repositories/cache_repo.py` (interfaz `CacheRepository` + `InMemoryCacheRepository`,
+  expiración lazy con `time.monotonic()`), `services/cache_service.py`
+  (`construir_key` `"{fuente}:{cuit}"`, `obtener_cacheado`, `guardar_en_cache` y
+  TTLs `TTL_BCRA`/`TTL_ARCA`=24h, `TTL_BORA`=7d) + tests (5/5). Todavía sin cablear
+  en `job_service`; se integra al enchufar BCRA.
 
-**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline, persistencia
+**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché),
+persistencia
 real (`SupabaseJobRepository`), autenticación (JWT + refresh), integraciones
 Anthropic, rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
 Ver `ARCHITECTURE.md` para la deuda técnica detallada.
