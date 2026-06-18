@@ -64,7 +64,9 @@ Reglas no negociables:
 - Esqueleto del backend por capas, sin lógica de negocio.
 - `main.py` con handler de errores, security headers, CORS y `GET /health`.
 - `settings.py`, `errors.py`, `logger.py`, `error_handler.py`.
+- `services/cuit_service.py`: guardrail de CUIT (limpieza, dígito verificador
+  módulo 11, tipo de persona, `validar_cuit_juridica`) + tests (6/6 pasando).
 
-**Pendiente:** autenticación (JWT + refresh), validación de CUIT, integraciones
-Supabase/Anthropic, rate limiting, migraciones SQL con RLS, tests.
+**Pendiente:** autenticación (JWT + refresh), integraciones Supabase/Anthropic,
+rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
 Ver `ARCHITECTURE.md` para la deuda técnica detallada.

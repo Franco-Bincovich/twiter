@@ -19,6 +19,13 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
   `{"error": True, "message": ..., "code": ...}`.
 - `requirements.txt` con versiones exactas y `.env.example` con todas las variables.
 - `.gitignore`, `README.md`, `ARCHITECTURE.md` y `CLAUDE.md` del proyecto.
+- `services/cuit_service.py`: validación y clasificación de CUIT (lógica pura).
+  Funciones `limpiar_cuit`, `validar_digito_verificador` (módulo 11),
+  `detectar_tipo_persona` y el guardrail `validar_cuit_juridica`, que solo deja
+  pasar personas jurídicas válidas.
+- `tests/test_cuit_service.py`: 6 casos del guardrail (jurídica válida, jurídica
+  con separadores, física no permitida, dígito verificador incorrecto, menos de
+  11 dígitos, prefijo desconocido).
 
 ### Fixed
 
