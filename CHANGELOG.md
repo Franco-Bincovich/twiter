@@ -51,6 +51,32 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
     TTL por defecto `TTL_BCRA`/`TTL_ARCA` (24h) y `TTL_BORA` (7 días).
   - `tests/test_cache_service.py`: 5 casos (set+get, key inexistente→None,
     entrada expirada→None, formato de key, delete remueve la entrada).
+- Capa de autenticación — seguridad pura, sin endpoints todavía (routers y
+  controllers van en la sesión siguiente). Sigue SEGURIDAD-PENTEST.md 2.1/2.2/2.3/2.5:
+  - `schemas/auth.py`: `RegisterRequest` (email + password min 8), `LoginRequest`,
+    `TokenResponse` (access/refresh/`token_type="bearer"`) y la entidad `User`
+    (id, email, password_hash, onboarding_completed, created_at).
+  - `repositories/user_repo.py`: interfaz `UserRepository` + `InMemoryUserRepository`
+    (find_by_email/find_by_id/create/update_last_login, thread-safe).
+  - `repositories/refresh_token_repo.py`: interfaz `RefreshTokenRepository` +
+    `InMemoryRefreshTokenRepository`. Guarda los refresh tokens SIEMPRE hasheados
+    (§2.5), nunca en texto plano; un token activo por usuario.
+  - `utils/jwt.py`: `create_access_token`/`create_refresh_token` (JWT tipados con
+    jose, exp/iat desde `settings`) y `verify_token` (error genérico `INVALID_TOKEN`
+    401, §2.3). El refresh lleva un `jti` único para no colisionar entre emisiones
+    del mismo segundo. Separado de `auth_service` para respetar el límite de 150 líneas.
+  - `services/auth_service.py`: `register`/`login`/`refresh_access_token`/`logout`.
+    Passwords y refresh tokens hasheados con bcrypt (passlib) previo digest SHA-256
+    para sortear el truncado a 72 bytes de bcrypt. Errores siempre genéricos: email
+    duplicado→`REGISTRATION_FAILED` 409; credenciales→`INVALID_CREDENTIALS` 401
+    (mismo error exista o no el usuario). Rotación de refresh exacta a §2.5.
+  - `middleware/auth.py`: `PUBLIC_ROUTES` (`/health` + auth) y `auth_middleware`
+    que exige Bearer token, lo verifica y setea `request.state.user`; 401 genérico
+    ante token ausente o inválido. No verifica ownership (§2.4, a nivel endpoint).
+    Aún sin registrar en `main.py` (se cablea al crear los endpoints).
+  - `tests/test_auth_service.py`: 8 casos (hash del password, email duplicado,
+    login ok, password incorrecto, email inexistente→mismo error, verify_token
+    válido/corrupto, rotación invalida el refresh viejo).
 
 ### Fixed
 

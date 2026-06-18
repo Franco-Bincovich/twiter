@@ -77,9 +77,17 @@ Reglas no negociables:
   (`construir_key` `"{fuente}:{cuit}"`, `obtener_cacheado`, `guardar_en_cache` y
   TTLs `TTL_BCRA`/`TTL_ARCA`=24h, `TTL_BORA`=7d) + tests (5/5). Todavía sin cablear
   en `job_service`; se integra al enchufar BCRA.
+- Capa de autenticación (seguridad pura, sin endpoints todavía): `schemas/auth.py`
+  (`RegisterRequest`/`LoginRequest`/`TokenResponse` + entidad `User`),
+  `repositories/user_repo.py` y `repositories/refresh_token_repo.py` (interfaces +
+  impl en memoria; refresh tokens hasheados, nunca en texto plano), `utils/jwt.py`
+  (create/verify de JWT tipados access/refresh, refresh con `jti` único),
+  `services/auth_service.py` (register/login/refresh con rotación §2.5/logout;
+  bcrypt + SHA-256 previo; errores genéricos §2.3) y `middleware/auth.py`
+  (`PUBLIC_ROUTES` + `auth_middleware`, sin registrar en `main.py` aún) + tests (8/8).
 
 **Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché),
-persistencia
-real (`SupabaseJobRepository`), autenticación (JWT + refresh), integraciones
+persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`), routers y
+controllers de auth (cablear `auth_middleware` en `main.py`), integraciones
 Anthropic, rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
 Ver `ARCHITECTURE.md` para la deuda técnica detallada.
