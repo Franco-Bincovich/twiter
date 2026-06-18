@@ -2,6 +2,37 @@
 
 Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8).
 
+## [Sin publicar]
+
+### Added
+
+- Endpoints de autenticación cableados sobre la lógica de seguridad ya existente
+  (no se tocó `auth_service`, `utils/jwt.py` ni la lógica de los repos):
+  - `controllers/auth_controller.py`: orquesta `auth_service`
+    (`register`/`login`/`refresh`/`logout`) y el usuario actual / onboarding contra
+    `user_repo`. Sin lógica de negocio propia; identidad siempre desde el token (§2.4).
+  - `routers/auth_router.py`: `POST /api/auth/register` (201),
+    `POST /api/auth/login` (200 + `TokenResponse`),
+    `POST /api/auth/refresh` (200 + par rotado) y `POST /api/auth/logout` (204,
+    requiere auth). Las tres primeras coinciden EXACTO con `PUBLIC_ROUTES`.
+  - `routers/me_router.py`: `GET /api/me` (usuario actual: id, email,
+    onboarding_completed) y `POST /api/onboarding/complete`. Ambas protegidas.
+  - `schemas/auth.py`: `RefreshRequest` (body con `refresh_token`) y `MeResponse`
+    (vista pública del usuario; nunca expone el hash).
+  - `repositories/user_repo.py`: `update_onboarding_completed(user_id)` en la
+    interfaz `UserRepository` y en `InMemoryUserRepository`.
+  - `middleware/auth.py`: dependency `get_current_user(request) -> UUID` que lee
+    `request.state.user` y devuelve el `sub` tipado; nunca acepta un id del cliente
+    (§2.4). Usada en `/api/me`, `/api/onboarding/complete` y logout.
+  - `main.py`: registra `auth_middleware` (vía `BaseHTTPMiddleware`) y los routers
+    de auth y me/onboarding. Orden de middlewares: `CORS → SecurityHeaders → auth`,
+    con CORS como el más externo para resolver el preflight OPTIONS antes de exigir
+    token; `/health` y las `PUBLIC_ROUTES` siguen pasando sin auth.
+  - `tests/test_auth_endpoints.py`: 7 casos con `TestClient` (register→201,
+    login→200 con tokens, /api/me sin token→401, /api/me con token→datos del user,
+    /health sin token→200, onboarding/complete→`onboarding_completed=True`,
+    refresh→par nuevo).
+
 ## [0.1.0] — Entrega 1 · Scaffold del backend
 
 ### Added

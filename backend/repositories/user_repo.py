@@ -27,6 +27,9 @@ class UserRepository(ABC):
     @abstractmethod
     async def update_last_login(self, user_id: UUID) -> None: ...
 
+    @abstractmethod
+    async def update_onboarding_completed(self, user_id: UUID) -> None: ...
+
 
 class InMemoryUserRepository(UserRepository):
     """Implementación en memoria, thread-safe con asyncio.Lock. Temporal."""
@@ -56,3 +59,11 @@ class InMemoryUserRepository(UserRepository):
     async def update_last_login(self, user_id: UUID) -> None:
         async with self._lock:
             self._last_login[user_id] = datetime.now(timezone.utc)
+
+    async def update_onboarding_completed(self, user_id: UUID) -> None:
+        async with self._lock:
+            user = self._users.get(user_id)
+            if user is not None:
+                self._users[user_id] = user.model_copy(
+                    update={"onboarding_completed": True}
+                )

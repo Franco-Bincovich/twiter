@@ -84,10 +84,17 @@ Reglas no negociables:
   (create/verify de JWT tipados access/refresh, refresh con `jti` único),
   `services/auth_service.py` (register/login/refresh con rotación §2.5/logout;
   bcrypt + SHA-256 previo; errores genéricos §2.3) y `middleware/auth.py`
-  (`PUBLIC_ROUTES` + `auth_middleware`, sin registrar en `main.py` aún) + tests (8/8).
+  (`PUBLIC_ROUTES` + `auth_middleware`) + tests (8/8).
+- Endpoints de auth + shell de onboarding (cableado sobre la seguridad ya existente):
+  `controllers/auth_controller.py` (orquesta `auth_service` + onboarding sobre
+  `user_repo`), `routers/auth_router.py` (`POST /api/auth/register|login|refresh|logout`),
+  `routers/me_router.py` (`GET /api/me`, `POST /api/onboarding/complete`),
+  `schemas/auth.py` (`RefreshRequest`, `MeResponse`), `get_current_user` en
+  `middleware/auth.py` (id del token, §2.4) y `update_onboarding_completed` en
+  `user_repo`. `main.py` registra `auth_middleware` (orden `CORS → SecurityHeaders
+  → auth`; `/health` y `PUBLIC_ROUTES` pasan sin token) + tests (7/7).
 
 **Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché),
-persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`), routers y
-controllers de auth (cablear `auth_middleware` en `main.py`), integraciones
+persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`), integraciones
 Anthropic, rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
 Ver `ARCHITECTURE.md` para la deuda técnica detallada.

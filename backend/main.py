@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.settings import settings
+from middleware.auth import auth_middleware
 from middleware.error_handler import global_error_handler
+from routers.auth_router import router as auth_router
 from routers.job_router import router as job_router
+from routers.me_router import router as me_router
 from utils.errors import AppError
 
 app = FastAPI(title="Status Empresarial por CUIT", version="0.1.0")
@@ -32,6 +35,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Orden de registro = orden inverso de ejecución (lo último añadido envuelve a lo
+# anterior). Se busca este flujo en cada request entrante:
+#   CORS → SecurityHeaders → auth → handler
+# CORS queda como el más externo para resolver el preflight OPTIONS (sin token)
+# antes de que `auth_middleware` exija credenciales. `auth_middleware` deja pasar
+# /health y las PUBLIC_ROUTES sin token; todo lo demás requiere Bearer válido.
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +54,8 @@ app.add_middleware(
 app.add_exception_handler(AppError, global_error_handler)
 app.add_exception_handler(Exception, global_error_handler)
 
+app.include_router(auth_router)
+app.include_router(me_router)
 app.include_router(job_router)
 
 

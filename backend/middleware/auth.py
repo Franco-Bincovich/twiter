@@ -5,9 +5,12 @@ firma con utils/jwt.verify_token y deja el payload en request.state.user. No
 verifica ownership del recurso: eso es responsabilidad de cada endpoint (2.4).
 """
 
+from uuid import UUID
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from utils.errors import AppError
 from utils.jwt import verify_token
 from utils.logger import logger
 
@@ -48,3 +51,27 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse(status_code=401, content=_UNAUTHORIZED)
 
     return await call_next(request)
+
+
+def get_current_user(request: Request) -> UUID:
+    """Dependency: id del usuario autenticado, tomado SIEMPRE del token (§2.4).
+
+    Lee el payload que `auth_middleware` dejó en `request.state.user` y devuelve su
+    claim `sub` como UUID tipado. Nunca acepta un id provisto por el cliente: los
+    endpoints protegidos operan así solo sobre el dueño del token, garantizando
+    ownership sin comparar identificadores externos.
+
+    Args:
+        request: Request entrante; debe haber pasado por `auth_middleware`.
+
+    Returns:
+        El UUID del usuario autenticado.
+
+    Raises:
+        AppError: code 'UNAUTHORIZED' (401), mensaje genérico, si no hay payload o
+            no trae un `sub` utilizable.
+    """
+    payload = getattr(request.state, "user", None)
+    if not payload or not payload.get("sub"):
+        raise AppError("No autorizado", "UNAUTHORIZED", 401)
+    return UUID(payload["sub"])

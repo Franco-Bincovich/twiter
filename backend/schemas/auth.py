@@ -24,12 +24,26 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class RefreshRequest(BaseModel):
+    """Payload para rotar el par de tokens a partir de un refresh token."""
+
+    refresh_token: str = Field(min_length=1)
+
+
 class TokenResponse(BaseModel):
     """Par de tokens emitido tras un login o un refresh exitoso."""
 
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class MeResponse(BaseModel):
+    """Vista pública del usuario actual; nunca expone el hash del password."""
+
+    id: UUID
+    email: EmailStr
+    onboarding_completed: bool
 
 
 class User(BaseModel):
