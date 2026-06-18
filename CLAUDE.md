@@ -93,8 +93,15 @@ Reglas no negociables:
   `middleware/auth.py` (id del token, §2.4) y `update_onboarding_completed` en
   `user_repo`. `main.py` registra `auth_middleware` (orden `CORS → SecurityHeaders
   → auth`; `/health` y `PUBLIC_ROUTES` pasan sin token) + tests (7/7).
+- Redactor IA del informe (agente transversal, fuentes aún sin conectar):
+  `integrations/anthropic_client.py` (wrapper fino del SDK, aísla la API §6.2; key
+  de `settings`; `generar_texto` con system separado del user §6.1; fallo →
+  `CLAUDE_UNAVAILABLE` 503) y `services/report_service.py` (`SYSTEM_PROMPT` solo
+  hechos/sin valorativos, `sanitizar_datos_entrada` §6.1, `generar_informe`,
+  `validar_salida` §6.3 → `REPORT_VALIDATION_FAILED` 500). Sin cablear al
+  `job_service` todavía (se conecta al enchufar BCRA) + tests (6/6, cliente mockeado).
 
-**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché),
-persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`), integraciones
-Anthropic, rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
-Ver `ARCHITECTURE.md` para la deuda técnica detallada.
+**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché) y
+cablear el redactor en `job_service`, persistencia real
+(`SupabaseJobRepository`/`SupabaseUserRepository`), rate limiting, migraciones SQL
+con RLS, más tests del flujo de informe. Ver `ARCHITECTURE.md` para la deuda técnica.

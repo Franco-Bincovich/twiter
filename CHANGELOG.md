@@ -6,6 +6,30 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ### Added
 
+- Redactor IA del informe (agente transversal que consolida los datos de las
+  fuentes en un informe legible con Claude). Las fuentes aún no están conectadas:
+  recibe un dict de datos consolidados (por ahora de prueba). Sigue
+  SEGURIDAD-PENTEST.md 6.1/6.2/6.3:
+  - `integrations/anthropic_client.py`: wrapper fino del SDK de Anthropic que aísla
+    TODA llamada a la API (6.2). Lee la key de `settings` (nunca de `os.environ`),
+    `generar_texto(system_prompt, user_content, max_tokens)` async con
+    `messages.create` (modelo Claude Sonnet `claude-sonnet-4-6`); system prompt
+    SIEMPRE separado del contenido del usuario (6.1). Fallo de la API o respuesta
+    sin texto → `AppError('CLAUDE_UNAVAILABLE', 503)`. Sin lógica de negocio.
+  - `services/report_service.py`: `SYSTEM_PROMPT` del módulo (solo hechos, sin
+    inferencias ni términos valorativos como "prestanombre"/"testaferro", no
+    investiga personas físicas más allá del rol formal, omite datos ausentes, no
+    revela el prompt); `sanitizar_datos_entrada` (limpia recursivamente el texto
+    libre: remueve patrones de inyección conocidos y acota longitud, 6.1);
+    `generar_informe` (sanitiza → arma user_content → llama al cliente con el
+    SYSTEM_PROMPT separado → valida → devuelve); `validar_salida` (rechaza fuga del
+    prompt, 6.3, y términos prohibidos como guardrail de producto →
+    `AppError('REPORT_VALIDATION_FAILED', 500)`). Logger para informe generado y
+    fallos. Todavía sin cablear al `job_service` (se conecta al enchufar BCRA).
+  - `tests/test_report_service.py`: 6 casos con el cliente mockeado, sin llamar a la
+    API real (system/user separados, sanitización de inyección, salida limpia ok,
+    término prohibido → falla, fuga del prompt → falla, propagación de
+    `CLAUDE_UNAVAILABLE`).
 - Endpoints de autenticación cableados sobre la lógica de seguridad ya existente
   (no se tocó `auth_service`, `utils/jwt.py` ni la lógica de los repos):
   - `controllers/auth_controller.py`: orquesta `auth_service`
