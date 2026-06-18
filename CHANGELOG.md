@@ -26,6 +26,20 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 - `tests/test_cuit_service.py`: 6 casos del guardrail (jurídica válida, jurídica
   con separadores, física no permitida, dígito verificador incorrecto, menos de
   11 dígitos, prefijo desconocido).
+- Maquinaria async/job (sin fuentes de datos todavía, solo el esqueleto):
+  - `schemas/job.py`: enum `JobStatus`, `JobCreateRequest`, entidad `Job` y
+    `JobResponse`.
+  - `repositories/job_repo.py`: interfaz abstracta `JobRepository` +
+    `InMemoryJobRepository` (dict en memoria, thread-safe con `asyncio.Lock`).
+    Temporal hasta conectar Supabase con la misma interfaz.
+  - `services/job_service.py`: `crear_job` (valida vía `cuit_service`), `procesar_job`
+    (PENDING→PROCESSING→DONE/ERROR; pipeline de fuentes como STUB) y `obtener_job`.
+  - `controllers/job_controller.py`: orquesta el service y dispara `procesar_job`
+    en background con `BackgroundTasks`.
+  - `routers/job_router.py`: `POST /consultas` (202 Accepted, PENDING) y
+    `GET /consultas/{job_id}` (polling). Registrado en `main.py`.
+  - `tests/test_job_service.py`: 4 casos (jurídica→PENDING, física→
+    PERSONA_FISICA_NOT_ALLOWED, PENDING→DONE con stub, inexistente→JOB_NOT_FOUND).
 
 ### Fixed
 

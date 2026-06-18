@@ -66,7 +66,13 @@ Reglas no negociables:
 - `settings.py`, `errors.py`, `logger.py`, `error_handler.py`.
 - `services/cuit_service.py`: guardrail de CUIT (limpieza, dígito verificador
   módulo 11, tipo de persona, `validar_cuit_juridica`) + tests (6/6 pasando).
+- Maquinaria async/job (esqueleto, sin fuentes de datos): `schemas/job.py`,
+  `repositories/job_repo.py` (interfaz `JobRepository` + `InMemoryJobRepository`),
+  `services/job_service.py` (pipeline de fuentes como STUB), `controllers/job_controller.py`,
+  `routers/job_router.py` (`POST /consultas`, `GET /consultas/{job_id}`) + tests
+  (4/4). Las fuentes reales (BCRA/ARCA) se enchufan en `_ejecutar_pipeline`.
 
-**Pendiente:** autenticación (JWT + refresh), integraciones Supabase/Anthropic,
-rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
+**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline, persistencia
+real (`SupabaseJobRepository`), autenticación (JWT + refresh), integraciones
+Anthropic, rate limiting, migraciones SQL con RLS, más tests del flujo de informe.
 Ver `ARCHITECTURE.md` para la deuda técnica detallada.

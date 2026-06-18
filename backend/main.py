@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.settings import settings
 from middleware.error_handler import global_error_handler
+from routers.job_router import router as job_router
 from utils.errors import AppError
 
 app = FastAPI(title="Status Empresarial por CUIT", version="0.1.0")
@@ -42,6 +43,8 @@ app.add_middleware(
 
 app.add_exception_handler(AppError, global_error_handler)
 app.add_exception_handler(Exception, global_error_handler)
+
+app.include_router(job_router)
 
 
 @app.get("/health")
