@@ -133,6 +133,14 @@ Reglas no negociables:
   `REPORT_VALIDATION_FAILED` → ERROR con el BCRA ya cacheado. No se crearon fuentes
   nuevas, solo se consumen los services existentes + tests (8/8, `bcra_service` y
   `report_service` mockeados; caché en memoria reseteada por test).
+- `frontend_prueba/index.html` (TEMPORAL, solo validación manual de la Entrega 1):
+  HTML vanilla feo a propósito (sin build/frameworks/CDN) que hace `POST /consultas`
+  + polling de `GET /consultas/{job_id}` con estados de carga/error/done. Para que
+  funcione sin auth se agregaron DOS bypass de desarrollo, ambos condicionales a
+  `app_env == "development"` (en prod no aplican): en `middleware/auth.py`,
+  `_is_dev_bypass` deja pasar `/consultas` y `/consultas/{job_id}` sin token; en
+  `main.py`, CORS suma `http://localhost:5500` y `http://127.0.0.1:5500` (nunca
+  `"*"`). Todo esto es scratch de prueba y se quita antes de producción.
 
 **Pendiente:** conectar ARCA, persistencia real
 (`SupabaseJobRepository`/`SupabaseUserRepository`), rate limiting, migraciones SQL

@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from config.settings import settings
 from utils.errors import AppError
 from utils.jwt import verify_token
 from utils.logger import logger
@@ -22,7 +23,27 @@ PUBLIC_ROUTES = [
     "/api/auth/refresh",
 ]
 
+# BYPASS DE DESARROLLO — NO DEBE QUEDAR ACTIVO EN PRODUCCIÓN.
+# Solo cuando settings.app_env == "development" se permite acceder a las rutas de
+# consultas sin token, para habilitar `frontend_prueba` (validación manual de la
+# Entrega 1). En cualquier otro entorno (app_env != "development") estas rutas
+# siguen exigiendo Bearer válido como cualquier otra. El bypass es SIEMPRE
+# condicional al entorno: nunca son públicas de forma permanente.
+_DEV_BYPASS_PREFIX = "/consultas"
+
 _UNAUTHORIZED = {"error": True, "message": "No autorizado", "code": "UNAUTHORIZED"}
+
+
+def _is_dev_bypass(path: str) -> bool:
+    """True si la ruta cae en el bypass de consultas y estamos en desarrollo.
+
+    Cubre tanto `/consultas` (POST de creación) como `/consultas/{job_id}` (GET de
+    polling). Solo aplica si `settings.app_env == "development"`; en prod devuelve
+    siempre False y la ruta queda protegida.
+    """
+    if settings.app_env != "development":
+        return False
+    return path == _DEV_BYPASS_PREFIX or path.startswith(f"{_DEV_BYPASS_PREFIX}/")
 
 
 async def auth_middleware(request: Request, call_next):
@@ -37,6 +58,12 @@ async def auth_middleware(request: Request, call_next):
         401 genérico si falta el token o no se puede verificar.
     """
     if request.url.path in PUBLIC_ROUTES:
+        return await call_next(request)
+
+    # Bypass de desarrollo para las rutas de consultas (ver _is_dev_bypass). Nunca
+    # se activa en prod: allí estas rutas siguen exigiendo token.
+    if _is_dev_bypass(request.url.path):
+        logger.warning("Bypass de auth (development)", extra={"path": request.url.path})
         return await call_next(request)
 
     token = request.headers.get("Authorization", "").replace("Bearer ", "")

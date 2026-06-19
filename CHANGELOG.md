@@ -6,6 +6,23 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ### Added
 
+- `frontend_prueba/index.html` (TEMPORAL — solo validación manual de la Entrega 1):
+  un único HTML vanilla (CSS+JS inline, sin frameworks, sin build, sin CDN), feo a
+  propósito. Input de CUIT + botón "Consultar": hace `POST /consultas`, luego polling
+  `GET /consultas/{job_id}` cada 1.5s (máx 20 intentos → timeout). Estados UX mínimos
+  (UX-UI.md): "Consultando..." en pending/processing; en done muestra denominación +
+  informe y los `datos_bcra` crudos en un `<details>`/`<pre>` colapsable; en error
+  muestra `message` + `code` en rojo. Maneja 400/422 del POST sin romper. No tiene
+  tests (es scratch manual). Quitar junto con los bypass de desarrollo abajo.
+- Modo prueba en backend (SOLO `app_env == "development"`, para habilitar el front):
+  - `middleware/auth.py`: bypass de auth para `/consultas` y `/consultas/{job_id}`
+    (`_is_dev_bypass`), condicional a development. En prod (`app_env != development`)
+    esas rutas siguen exigiendo Bearer. Comentado como bypass que NO debe quedar en
+    prod; nunca es público de forma permanente. Loguea un warning en cada bypass.
+  - `main.py`: en development se agregan `http://localhost:5500` y
+    `http://127.0.0.1:5500` a los orígenes CORS (front de prueba); en prod no se
+    agregan. No se usa `"*"`.
+
 - `services/job_service.py`: se cablea el pipeline real en `_ejecutar_pipeline`,
   reemplazando el stub que devolvía `{"placeholder": "sin fuentes conectadas aún"}`.
   El job ahora resuelve el BCRA por caché (`cache_service`): con HIT usa lo cacheado

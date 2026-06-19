@@ -43,9 +43,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # /health y las PUBLIC_ROUTES sin token; todo lo demás requiere Bearer válido.
 app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Orígenes permitidos = los de settings. SOLO en desarrollo se suman los del
+# front de prueba (`frontend_prueba`, servido en :5500) para validación manual de
+# la Entrega 1. En prod no se agregan; nunca se usa "*". TEMPORAL: quitar junto con
+# frontend_prueba.
+_cors_origins = [origin.strip() for origin in settings.allowed_origins.split(",")]
+if settings.app_env == "development":
+    _cors_origins += ["http://localhost:5500", "http://127.0.0.1:5500"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",")],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],

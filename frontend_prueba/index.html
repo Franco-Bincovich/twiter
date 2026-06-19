@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRUEBA — Status Empresarial por CUIT</title>
+  <!--
+    FRONT DE PRUEBA TEMPORAL — solo para validación manual de la Entrega 1.
+    Feo a propósito: prioridad funcionalidad. Sin frameworks, sin build, sin CDN.
+    Requiere el backend en development (bypass de auth + CORS de :5500).
+    Servir desde http://127.0.0.1:5500 o http://localhost:5500 (ej. Live Server).
+  -->
+  <style>
+    body { font-family: monospace; margin: 24px; max-width: 760px; }
+    h1 { font-size: 18px; }
+    input { font-family: monospace; font-size: 14px; padding: 6px; width: 220px; }
+    button { font-family: monospace; font-size: 14px; padding: 6px 12px; cursor: pointer; }
+    #estado { margin-top: 16px; padding: 12px; border: 1px solid #999; min-height: 24px; }
+    .cargando { color: #555; }
+    .error { color: #b00020; font-weight: bold; white-space: pre-wrap; }
+    .bloque { border: 1px solid #333; padding: 12px; margin-top: 8px; }
+    .informe { white-space: pre-wrap; line-height: 1.4; }
+    pre { background: #f0f0f0; padding: 8px; overflow-x: auto; }
+    .deno { font-weight: bold; font-size: 16px; }
+    details { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>PRUEBA — Status Empresarial por CUIT</h1>
+  <p>Front rústico de prueba (Entrega 1). Backend esperado en <code>http://127.0.0.1:8000</code>.</p>
+
+  <div>
+    <input id="cuit" type="text" placeholder="30-71659554-0">
+    <button id="btn">Consultar</button>
+  </div>
+
+  <div id="estado">Ingresá un CUIT y presioná Consultar.</div>
+
+  <script>
+    const API = "http://127.0.0.1:8000";
+    const POLL_MS = 1500;
+    const MAX_INTENTOS = 20;
+
+    const estado = document.getElementById("estado");
+    const btn = document.getElementById("btn");
+    const inputCuit = document.getElementById("cuit");
+
+    btn.addEventListener("click", consultar);
+    inputCuit.addEventListener("keydown", (e) => { if (e.key === "Enter") consultar(); });
+
+    function escapar(texto) {
+      const div = document.createElement("div");
+      div.textContent = texto == null ? "" : String(texto);
+      return div.innerHTML;
+    }
+
+    function mostrarCargando(msg) {
+      estado.className = "cargando";
+      estado.textContent = msg;
+    }
+
+    function mostrarError(message, code) {
+      estado.className = "error";
+      estado.textContent = "ERROR" + (code ? " [" + code + "]" : "") + ": " + (message || "fallo desconocido");
+    }
+
+    function mostrarDone(resultado) {
+      estado.className = "";
+      const datos = JSON.stringify(resultado.datos_bcra, null, 2);
+      estado.innerHTML =
+        '<div class="bloque">' +
+          '<div class="deno">' + escapar(resultado.denominacion || "(sin denominación)") + '</div>' +
+          '<div style="font-size:12px;color:#666;">CUIT ' + escapar(resultado.cuit) +
+            ' · fuente_cache: ' + escapar(resultado.fuente_cache) + '</div>' +
+          '<hr>' +
+          '<div class="informe">' + escapar(resultado.informe) + '</div>' +
+        '</div>' +
+        '<details><summary>Datos crudos del BCRA (debug)</summary>' +
+          '<pre>' + escapar(datos) + '</pre>' +
+        '</details>';
+    }
+
+    async function consultar() {
+      const valor = inputCuit.value.trim();
+      if (!valor) { mostrarError("Ingresá un CUIT."); return; }
+
+      btn.disabled = true;
+      mostrarCargando("Consultando...");
+
+      let jobId;
+      try {
+        const resp = await fetch(API + "/consultas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cuit: valor, razon_social: null })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          // 422 PERSONA_FISICA_NOT_ALLOWED, 400 CUIT inválido, etc.
+          mostrarError(data.message || ("HTTP " + resp.status), data.code);
+          btn.disabled = false;
+          return;
+        }
+        jobId = data.id;
+      } catch (e) {
+        mostrarError("No se pudo contactar al backend (¿está corriendo en :8000?). " + e.message);
+        btn.disabled = false;
+        return;
+      }
+
+      await poll(jobId);
+      btn.disabled = false;
+    }
+
+    async function poll(jobId) {
+      for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+        mostrarCargando("Consultando... (intento " + intento + "/" + MAX_INTENTOS + ")");
+        let job;
+        try {
+          const resp = await fetch(API + "/consultas/" + jobId);
+          job = await resp.json().catch(() => ({}));
+          if (!resp.ok) { mostrarError(job.message || ("HTTP " + resp.status), job.code); return; }
+        } catch (e) {
+          mostrarError("Error durante el polling: " + e.message);
+          return;
+        }
+
+        if (job.status === "done") { mostrarDone(job.resultado || {}); return; }
+        if (job.status === "error") {
+          const err = job.error || {};
+          mostrarError(err.message || "El job terminó en error", err.code);
+          return;
+        }
+        // pending / processing → seguir esperando
+        await new Promise((r) => setTimeout(r, POLL_MS));
+      }
+      mostrarError("Timeout: el job no terminó tras " + MAX_INTENTOS + " intentos.");
+    }
+  </script>
+</body>
+</html>
