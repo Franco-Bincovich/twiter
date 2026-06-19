@@ -100,8 +100,24 @@ Reglas no negociables:
   hechos/sin valorativos, `sanitizar_datos_entrada` §6.1, `generar_informe`,
   `validar_salida` §6.3 → `REPORT_VALIDATION_FAILED` 500). Sin cablear al
   `job_service` todavía (se conecta al enchufar BCRA) + tests (6/6, cliente mockeado).
+- Collector de BCRA Central de Deudores (primera fuente real, fuentes-a-pipeline aún
+  sin cablear): `integrations/bcra_client.py` (transporte httpx async que aísla la
+  API §6.2; `consultar_deudas`/`consultar_historicas`/`consultar_cheques`, cada una
+  devuelve `results` o None en 404; base URL pública fija; reintentos con backoff
+  exponencial 3x ante corte/timeout/5xx, timeout 10s/intento; parseo `.json()` con
+  fallback `json.loads(text)` por el text/plain del BCRA; 400 → `BCRA_INVALID_CUIT`,
+  5xx/red agotados → `BCRA_UNAVAILABLE` 503; header `x-jws-signature` anotado para
+  validación futura), `services/bcra_service.py` (`obtener_situacion_crediticia`
+  orquesta los tres endpoints con `asyncio.gather`; deuda actual = núcleo que
+  propaga, histórico/cheques se degradan a vacío si caen) y
+  `services/bcra_normalizer.py` (normalización pura extraída por el límite de 150
+  líneas: deudas ×1000 = pesos reales, cheques sin ×1000, `situacion_maxima` peor del
+  periodo reciente, `entidades_activas` ignora situación 0, flags por entidad,
+  desvíos = situación != 1, cheques agregados con tope defensivo). Se pinea
+  `httpx==0.27.2` (§7.1, antes solo transitiva). Sin cablear a `job_service` ni a la
+  caché todavía + tests (6/6, `bcra_client` mockeado).
 
-**Pendiente:** conectar fuentes de datos (BCRA/ARCA) en el pipeline (con caché) y
-cablear el redactor en `job_service`, persistencia real
+**Pendiente:** cablear el collector de BCRA al pipeline de `job_service` (con caché)
+y enchufar el redactor, conectar ARCA, persistencia real
 (`SupabaseJobRepository`/`SupabaseUserRepository`), rate limiting, migraciones SQL
 con RLS, más tests del flujo de informe. Ver `ARCHITECTURE.md` para la deuda técnica.

@@ -23,3 +23,5 @@ env/
 Thumbs.db
 .vscode/
 .idea/
+
+_probar_bcra.py

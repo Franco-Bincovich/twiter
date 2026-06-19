@@ -4,8 +4,54 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ## [Sin publicar]
 
+### Fixed
+
+- `services/bcra_normalizer.py`: corregido el cálculo de desvíos del histórico. Antes
+  contaba como desvío toda entidad con `situacion != 1`, lo que incluía la situación 0
+  ("sin deuda informada", que es ausencia de deuda, no un deterioro de riesgo). Ahora
+  un desvío es únicamente `situacion` entre 2 y 5 inclusive; la 0 y la 1 no son
+  desvíos. `situacion_maxima` (peor situación del periodo más reciente) no cambia:
+  sigue considerando todas las situaciones. Test `test_bcra_service.py` ajustado con un
+  caso de situación 0 en el histórico que NO cuenta como desvío y uno de situación 3
+  que SÍ.
+
 ### Added
 
+- Collector de BCRA Central de Deudores (primera fuente real del producto). Cubre
+  los tres endpoints públicos del BCRA y normaliza su salida a un dict estable.
+  Todavía sin cablear a `job_service` ni a la caché.
+  - `integrations/bcra_client.py`: wrapper de transporte con httpx async que aísla
+    TODA llamada al BCRA (SEGURIDAD-PENTEST.md 6.2). Una función async por endpoint
+    (`consultar_deudas`, `consultar_historicas`, `consultar_cheques`), cada una
+    devuelve el `results` o None (404 = sin datos = resultado válido). Base URL como
+    constante del módulo (endpoint público fijo, sin auth). La API corta conexiones
+    de forma intermitente y marca el JSON como text/plain: reintentos con backoff
+    exponencial (3 intentos) ante corte/timeout/5xx, timeout explícito de 10s por
+    intento, y parseo con `response.json()` con fallback a `json.loads(text)`. 404 →
+    None; 400 → `AppError('BCRA_INVALID_CUIT', 400)`; 5xx/timeout/red agotados →
+    `AppError('BCRA_UNAVAILABLE', 503)`. El header `x-jws-signature` queda anotado
+    para validación de integridad futura (no se valida por ahora). Sin lógica de
+    negocio.
+  - `services/bcra_service.py`: `obtener_situacion_crediticia(cuit)` orquesta los
+    tres endpoints en paralelo (`asyncio.gather`). La deuda actual es el núcleo: si
+    cae, propaga; el histórico y los cheques son tolerantes: si caen, su sección
+    queda con defaults vacíos sin tumbar el informe. Devuelve el dict estable
+    `{denominacion, actual, historico, cheques}`.
+  - `services/bcra_normalizer.py`: normalización pura extraída del servicio para
+    respetar el límite de 150 líneas. Reglas confirmadas con datos reales: montos de
+    deudas en MILES de pesos → ×1000; montos de cheques en PESOS reales → sin tocar;
+    `situacion_maxima` = peor número del periodo más reciente; `entidades_activas`
+    ignora situación 0; flags activos (jurídica/judicial/recategorización/refi/
+    irrecuperable) contados por entidad; desvíos del histórico = situación != 1;
+    cheques agregados (recorre causal→entidad→detalle) con tope defensivo (solo
+    agregados, nunca el detalle completo).
+  - `tests/test_bcra_service.py`: 6 casos con `bcra_client` mockeado, sin pegarle a
+    la API real (empresa sana, empresa en default con flags y montos ×1000 vs
+    cheques sin ×1000, 404 en los tres endpoints, propagación de `BCRA_UNAVAILABLE`
+    en deuda actual, degradación al caer solo cheques/histórico, peor situación del
+    periodo más reciente).
+  - `requirements.txt`: se pinea `httpx==0.27.2` (antes solo transitiva de
+    anthropic/supabase); pasa a dependencia directa con versión exacta (§7.1).
 - Redactor IA del informe (agente transversal que consolida los datos de las
   fuentes en un informe legible con Claude). Las fuentes aún no están conectadas:
   recibe un dict de datos consolidados (por ahora de prueba). Sigue
