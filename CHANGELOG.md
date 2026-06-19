@@ -4,6 +4,27 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ## [Sin publicar]
 
+### Added
+
+- `services/job_service.py`: se cablea el pipeline real en `_ejecutar_pipeline`,
+  reemplazando el stub que devolvía `{"placeholder": "sin fuentes conectadas aún"}`.
+  El job ahora resuelve el BCRA por caché (`cache_service`): con HIT usa lo cacheado
+  y no golpea la fuente; con MISS consulta `bcra_service.obtener_situacion_crediticia`
+  y guarda el resultado normalizado (`TTL_BCRA`) **antes** de redactar, para que un
+  reintento no vuelva a pegarle al BCRA si falla el informe. Luego pasa los datos a
+  `report_service.generar_informe` y devuelve `{cuit, denominacion, datos_bcra,
+  informe, fuente_cache}`. No se crearon fuentes nuevas: solo se consumen los services
+  existentes (`bcra_service`, `cache_service`, `report_service`, `cuit_service`).
+  - Manejo de errores (lo envuelve `procesar_job`, que marca el job en ERROR con el
+    `code` del `AppError`): `BCRA_UNAVAILABLE`/`BCRA_INVALID_CUIT` (cae la deuda
+    actual) → ERROR sin cachear nada; `CLAUDE_UNAVAILABLE`/`REPORT_VALIDATION_FAILED`
+    → ERROR pero con los datos del BCRA ya cacheados.
+  - `tests/test_job_service.py`: el test del placeholder se reemplaza por casos del
+    pipeline real (mockeando `bcra_service` y `report_service`, sin API real): cache
+    MISS (consulta + cachea + informe, `fuente_cache` False), cache HIT (no consulta,
+    `fuente_cache` True), `BCRA_UNAVAILABLE` (ERROR sin cachear) y fallo de informe
+    (ERROR con BCRA cacheado, verificado por HIT en el reintento). 8 casos.
+
 ### Changed
 
 - El redactor IA (`services/report_service.py`) pasa de "reportar solo hechos" a actuar

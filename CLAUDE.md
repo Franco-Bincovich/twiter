@@ -121,10 +121,19 @@ Reglas no negociables:
   líneas: deudas ×1000 = pesos reales, cheques sin ×1000, `situacion_maxima` peor del
   periodo reciente, `entidades_activas` ignora situación 0, flags por entidad,
   desvíos = situación != 1, cheques agregados con tope defensivo). Se pinea
-  `httpx==0.27.2` (§7.1, antes solo transitiva). Sin cablear a `job_service` ni a la
-  caché todavía + tests (6/6, `bcra_client` mockeado).
+  `httpx==0.27.2` (§7.1, antes solo transitiva) + tests (6/6, `bcra_client` mockeado).
+- Pipeline real cableado en `services/job_service.py` (`_ejecutar_pipeline` reemplaza
+  el stub del placeholder): resuelve el BCRA por caché (`cache_service`) —HIT usa lo
+  cacheado sin golpear la fuente; MISS consulta `bcra_service` y cachea el normalizado
+  (`TTL_BCRA`) ANTES de redactar, para que un reintento no vuelva al BCRA si cae el
+  informe— y pasa los datos a `report_service.generar_informe`. Devuelve `{cuit,
+  denominacion, datos_bcra, informe, fuente_cache}`. Errores (los envuelve
+  `procesar_job`, que marca ERROR con el `code` del `AppError`): `BCRA_UNAVAILABLE`/
+  `BCRA_INVALID_CUIT` → ERROR sin cachear; `CLAUDE_UNAVAILABLE`/
+  `REPORT_VALIDATION_FAILED` → ERROR con el BCRA ya cacheado. No se crearon fuentes
+  nuevas, solo se consumen los services existentes + tests (8/8, `bcra_service` y
+  `report_service` mockeados; caché en memoria reseteada por test).
 
-**Pendiente:** cablear el collector de BCRA al pipeline de `job_service` (con caché)
-y enchufar el redactor, conectar ARCA, persistencia real
+**Pendiente:** conectar ARCA, persistencia real
 (`SupabaseJobRepository`/`SupabaseUserRepository`), rate limiting, migraciones SQL
 con RLS, más tests del flujo de informe. Ver `ARCHITECTURE.md` para la deuda técnica.
