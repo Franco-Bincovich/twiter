@@ -4,6 +4,29 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ## [Sin publicar]
 
+### Changed
+
+- El redactor IA (`services/report_service.py`) pasa de "reportar solo hechos" a actuar
+  como **analista experto en BCRA Central de Deudores**: traduce los datos a lenguaje
+  simple, da opinión experta SOBRE LOS DATOS (perfil sólido/deteriorado, evolución) y
+  estructura el informe en resumen + situación actual + histórico + cheques. Sigue siendo
+  el mismo service (no se creó un agente nuevo).
+  - `services/prompts/bcra_analista.py` (nuevo módulo): se extrae el `SYSTEM_PROMPT` a una
+    constante aparte para respetar el límite de 150 líneas del service y dejar un único
+    lugar auditable del prompt (SEGURIDAD-PENTEST.md 6.1). El prompt incluye glosario de
+    situaciones (0 a 5) y flags, e impone el límite clave: opina sobre el DATO, nunca
+    recomienda una DECISIÓN al usuario.
+  - `services/report_service.py`: `_construir_user_content` ahora arma el user_content a
+    partir del dict normalizado de `bcra_service` (`denominacion`, `actual`, `historico`,
+    `cheques`), serializado por sección en JSON legible y separado del system prompt (6.1).
+    `validar_salida` se amplía (defensa en profundidad, 6.3): además de la fuga del prompt
+    y los términos valorativos ya vetados, detecta patrones de recomendación de decisión
+    ("no le d", "no conviene", "te recomiendo", "evitá", "deberías", "es confiable para",
+    etc. — guardrail NO exhaustivo) → `REPORT_VALIDATION_FAILED` (500).
+  - `tests/test_report_service.py`: el test de separación system/user usa el dict de
+    `bcra_service`; se agregan casos de recomendación de decisión (falla), opinión sobre el
+    dato (pasa) y armado del user_content con las cuatro secciones del BCRA (9 casos).
+
 ### Fixed
 
 - `services/bcra_normalizer.py`: corregido el cálculo de desvíos del histórico. Antes

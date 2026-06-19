@@ -93,13 +93,20 @@ Reglas no negociables:
   `middleware/auth.py` (id del token, §2.4) y `update_onboarding_completed` en
   `user_repo`. `main.py` registra `auth_middleware` (orden `CORS → SecurityHeaders
   → auth`; `/health` y `PUBLIC_ROUTES` pasan sin token) + tests (7/7).
-- Redactor IA del informe (agente transversal, fuentes aún sin conectar):
-  `integrations/anthropic_client.py` (wrapper fino del SDK, aísla la API §6.2; key
-  de `settings`; `generar_texto` con system separado del user §6.1; fallo →
-  `CLAUDE_UNAVAILABLE` 503) y `services/report_service.py` (`SYSTEM_PROMPT` solo
-  hechos/sin valorativos, `sanitizar_datos_entrada` §6.1, `generar_informe`,
-  `validar_salida` §6.3 → `REPORT_VALIDATION_FAILED` 500). Sin cablear al
-  `job_service` todavía (se conecta al enchufar BCRA) + tests (6/6, cliente mockeado).
+- Redactor IA del informe = analista experto en BCRA Central de Deudores (agente
+  transversal, fuentes aún sin conectar): `integrations/anthropic_client.py` (wrapper
+  fino del SDK, aísla la API §6.2; key de `settings`; `generar_texto` con system
+  separado del user §6.1; fallo → `CLAUDE_UNAVAILABLE` 503),
+  `services/prompts/bcra_analista.py` (`SYSTEM_PROMPT` extraído del service por el
+  límite de 150 líneas y como único lugar auditable §6.1: traduce los datos, opina
+  SOBRE LOS DATOS con glosario de situaciones 0-5 y flags, pero NUNCA recomienda una
+  DECISIÓN al usuario) y `services/report_service.py` (`_construir_user_content` arma
+  el user_content desde el dict normalizado de `bcra_service` —denominacion/actual/
+  historico/cheques— por sección en JSON §6.1; `sanitizar_datos_entrada`;
+  `generar_informe`; `validar_salida` §6.3 verifica fuga del prompt + términos
+  valorativos + patrones de recomendación de decisión → `REPORT_VALIDATION_FAILED`
+  500). Sin cablear al `job_service` todavía (se conecta al enchufar BCRA) + tests
+  (9/9, cliente mockeado).
 - Collector de BCRA Central de Deudores (primera fuente real, fuentes-a-pipeline aún
   sin cablear): `integrations/bcra_client.py` (transporte httpx async que aísla la
   API §6.2; `consultar_deudas`/`consultar_historicas`/`consultar_cheques`, cada una

@@ -26,6 +26,27 @@ DATOS_PRUEBA = {
     "objeto_social": "Servicios de software y consultoría.",
 }
 
+# Dict normalizado tal como lo arma bcra_service (denominacion/actual/historico/cheques).
+DATOS_BCRA = {
+    "denominacion": "EMPRESA EJEMPLO SA",
+    "actual": {
+        "periodo": "202405",
+        "situacion_maxima": 3,
+        "entidades_activas": 2,
+        "deuda_total": 4_800_000.0,
+        "entidades": [{"entidad": "BANCO A", "situacion": 3, "monto": 4_800_000.0}],
+        "flags_activos": {"situacion_juridica": 1, "proceso_judicial": 0},
+    },
+    "historico": {
+        "periodos_analizados": 12,
+        "desvios": [{"periodo": "202403", "entidad": "BANCO A", "situacion": 3}],
+    },
+    "cheques": {
+        "tiene_cheques": True, "total_cheques": 2, "total_pagados": 0,
+        "monto_total": 150000.0, "mayor_cheque": 100000.0, "por_causal": {"SIN FONDOS": 2},
+    },
+}
+
 
 class _ClienteMock:
     """Reemplazo de anthropic_client: captura los argumentos y devuelve texto fijo."""
@@ -49,7 +70,7 @@ def test_generar_informe_llama_al_cliente_con_system_y_user_separados(monkeypatc
         report_service.anthropic_client, "generar_texto", mock.generar_texto
     )
 
-    informe = asyncio.run(generar_informe(DATOS_PRUEBA))
+    informe = asyncio.run(generar_informe(DATOS_BCRA))
 
     assert informe == "Informe: la empresa figura activa en los registros."
     # El system prompt es el del módulo, separado del contenido del usuario (6.1).
@@ -87,6 +108,36 @@ def test_validar_salida_fuga_del_system_prompt_falla():
     with pytest.raises(AppError) as exc:
         validar_salida(filtrado)
     assert exc.value.code == "REPORT_VALIDATION_FAILED"
+
+
+def test_validar_salida_recomendacion_de_decision_falla():
+    # El analista opina sobre el dato, nunca recomienda una decisión al usuario.
+    with pytest.raises(AppError) as exc:
+        validar_salida("No le des crédito a esta empresa: el riesgo es alto.")
+    assert exc.value.code == "REPORT_VALIDATION_FAILED"
+    assert exc.value.status_code == 500
+
+
+def test_validar_salida_opinion_sobre_el_dato_pasa():
+    # Opinar sobre el perfil crediticio SÍ está permitido (no es recomendación).
+    validar_salida("El perfil muestra un deterioro severo y sostenido en el último año.")
+
+
+def test_generar_informe_arma_user_content_con_secciones_bcra(monkeypatch):
+    mock = _ClienteMock("La empresa presenta un perfil con atrasos relevantes.")
+    monkeypatch.setattr(
+        report_service.anthropic_client, "generar_texto", mock.generar_texto
+    )
+
+    informe = asyncio.run(generar_informe(DATOS_BCRA))
+
+    assert informe == "La empresa presenta un perfil con atrasos relevantes."
+    # El user_content lleva las cuatro secciones del dict de bcra_service, separado del prompt.
+    assert mock.system_prompt == SYSTEM_PROMPT
+    assert SYSTEM_PROMPT not in mock.user_content
+    for clave in ("denominacion", "actual", "historico", "cheques"):
+        assert clave in mock.user_content
+    assert "EMPRESA EJEMPLO SA" in mock.user_content
 
 
 def test_generar_informe_propaga_claude_unavailable(monkeypatch):
