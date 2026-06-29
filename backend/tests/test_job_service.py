@@ -28,6 +28,9 @@ DATOS_BCRA = {
 }
 INFORME = "La empresa registra situación 1 en todas las entidades activas."
 
+DATOS_ARCA = {"razon_social": "Acme Sa", "estado_inscripcion": "activo", "nivel_alerta": "bajo"}
+INFORME_ARCA = "La empresa figura con inscripción activa en ARCA."
+
 
 @pytest.fixture(autouse=True)
 def _reset_cache():
@@ -64,6 +67,34 @@ def _mock_report(monkeypatch, *, resultado=None, error=None):
     return llamadas
 
 
+def _mock_arca(monkeypatch, *, resultado=None, error=None):
+    """Mockea arca_service.obtener_datos_arca (cuit, razon_social) y cuenta sus llamadas."""
+    llamadas = {"n": 0}
+
+    async def fake(cuit, razon_social):
+        llamadas["n"] += 1
+        if error is not None:
+            raise error
+        return resultado
+
+    monkeypatch.setattr(job_service.arca_service, "obtener_datos_arca", fake)
+    return llamadas
+
+
+def _mock_report_arca(monkeypatch, *, resultado=None, error=None):
+    """Mockea report_arca.generar_informe_arca y cuenta sus llamadas."""
+    llamadas = {"n": 0}
+
+    async def fake(datos):
+        llamadas["n"] += 1
+        if error is not None:
+            raise error
+        return resultado
+
+    monkeypatch.setattr(job_service.report_arca, "generar_informe_arca", fake)
+    return llamadas
+
+
 def test_crear_job_juridica_queda_pending():
     job = asyncio.run(crear_job(CUIT_JURIDICA, "ACME SA"))
     assert job.status == JobStatus.PENDING
@@ -81,9 +112,12 @@ def test_crear_job_fisica_no_permitida():
 def test_pipeline_cache_miss_consulta_bcra_y_genera_informe(monkeypatch):
     bcra = _mock_bcra(monkeypatch, resultado=DATOS_BCRA)
     report = _mock_report(monkeypatch, resultado=INFORME)
+    arca = _mock_arca(monkeypatch, resultado=DATOS_ARCA)
+    report_arca = _mock_report_arca(monkeypatch, resultado=INFORME_ARCA)
 
     async def flujo():
-        job = await crear_job(CUIT_JURIDICA, None)
+        # razón social presente: ARCA puede construir la URL y proceder.
+        job = await crear_job(CUIT_JURIDICA, "ACME SA")
         procesado = await procesar_job(job.id)
         cacheado = await cache_service.obtener_cacheado("bcra", CUIT_JURIDICA)
         return procesado, cacheado
@@ -91,32 +125,87 @@ def test_pipeline_cache_miss_consulta_bcra_y_genera_informe(monkeypatch):
     procesado, cacheado = asyncio.run(flujo())
     assert bcra["n"] == 1  # MISS: se consultó el BCRA
     assert report["n"] == 1
+    assert arca["n"] == 1  # MISS: se consultó ARCA
+    assert report_arca["n"] == 1
     assert procesado.status == JobStatus.DONE
     assert procesado.error is None
-    assert procesado.resultado["informe"] == INFORME
-    assert procesado.resultado["fuente_cache"] is False
+    assert procesado.resultado["informe_bcra"] == INFORME
+    assert procesado.resultado["fuente_cache_bcra"] is False
     assert procesado.resultado["denominacion"] == "ACME SA"
     assert procesado.resultado["datos_bcra"] == DATOS_BCRA
+    # Bloque ARCA (independiente del BCRA), resuelto en el mismo job.
+    assert procesado.resultado["informe_arca"] == INFORME_ARCA
+    assert procesado.resultado["fuente_cache_arca"] is False
+    assert procesado.resultado["datos_arca"] == DATOS_ARCA
+    assert procesado.resultado["arca_error"] is None
     assert cacheado == DATOS_BCRA  # quedó cacheado tras el MISS
 
 
 def test_pipeline_cache_hit_no_consulta_bcra(monkeypatch):
     bcra = _mock_bcra(monkeypatch, error=AssertionError("no debe llamarse en HIT"))
     report = _mock_report(monkeypatch, resultado=INFORME)
+    _mock_arca(monkeypatch, resultado=DATOS_ARCA)
+    _mock_report_arca(monkeypatch, resultado=INFORME_ARCA)
 
     async def flujo():
         await cache_service.guardar_en_cache(
             "bcra", CUIT_JURIDICA, DATOS_BCRA, cache_service.TTL_BCRA
         )
-        job = await crear_job(CUIT_JURIDICA, None)
+        job = await crear_job(CUIT_JURIDICA, "ACME SA")
         return await procesar_job(job.id)
 
     procesado = asyncio.run(flujo())
     assert bcra["n"] == 0  # HIT: NO se consultó el BCRA
     assert report["n"] == 1
     assert procesado.status == JobStatus.DONE
-    assert procesado.resultado["fuente_cache"] is True
+    assert procesado.resultado["fuente_cache_bcra"] is True
     assert procesado.resultado["datos_bcra"] == DATOS_BCRA
+
+
+def test_pipeline_arca_degrada_sin_tumbar_el_job(monkeypatch):
+    # ARCA caído NO debe tumbar el job: el informe BCRA se conserva y ARCA queda en
+    # None con el error anotado (informes independientes, decisión de diseño Sesión ARCA).
+    _mock_bcra(monkeypatch, resultado=DATOS_BCRA)
+    _mock_report(monkeypatch, resultado=INFORME)
+    arca = _mock_arca(
+        monkeypatch, error=AppError("CUIT no encontrado en ARCA", "ARCA_CUIT_NOT_FOUND", 404)
+    )
+    report_arca = _mock_report_arca(monkeypatch, resultado=INFORME_ARCA)
+
+    async def flujo():
+        # razón social presente: ARCA llega a la fuente, que falla y degrada.
+        job = await crear_job(CUIT_JURIDICA, "ACME SA")
+        return await procesar_job(job.id)
+
+    procesado = asyncio.run(flujo())
+    assert arca["n"] == 1
+    assert report_arca["n"] == 0  # nunca se llegó al informe ARCA
+    assert procesado.status == JobStatus.DONE  # el job NO se cae por ARCA
+    assert procesado.resultado["informe_bcra"] == INFORME  # BCRA conservado
+    assert procesado.resultado["datos_arca"] is None
+    assert procesado.resultado["informe_arca"] is None
+    assert procesado.resultado["arca_error"]["code"] == "ARCA_CUIT_NOT_FOUND"
+
+
+def test_pipeline_arca_sin_razon_social_degrada(monkeypatch):
+    # Sin razón social no se puede construir la URL de ARCA: degrada con
+    # ARCA_NO_RAZON_SOCIAL sin tumbar el job y sin llegar a consultar la fuente.
+    _mock_bcra(monkeypatch, resultado=DATOS_BCRA)
+    _mock_report(monkeypatch, resultado=INFORME)
+    arca = _mock_arca(monkeypatch, resultado=DATOS_ARCA)
+    report_arca = _mock_report_arca(monkeypatch, resultado=INFORME_ARCA)
+
+    async def flujo():
+        job = await crear_job(CUIT_JURIDICA, None)  # sin razón social
+        return await procesar_job(job.id)
+
+    procesado = asyncio.run(flujo())
+    assert arca["n"] == 0  # NUNCA se consultó la fuente ARCA
+    assert report_arca["n"] == 0
+    assert procesado.status == JobStatus.DONE  # el job NO se cae
+    assert procesado.resultado["informe_bcra"] == INFORME  # BCRA conservado
+    assert procesado.resultado["datos_arca"] is None
+    assert procesado.resultado["arca_error"]["code"] == "ARCA_NO_RAZON_SOCIAL"
 
 
 def test_pipeline_bcra_unavailable_deja_error_y_no_cachea(monkeypatch):

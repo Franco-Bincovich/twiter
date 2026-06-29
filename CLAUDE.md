@@ -141,7 +141,83 @@ Reglas no negociables:
   `_is_dev_bypass` deja pasar `/consultas` y `/consultas/{job_id}` sin token; en
   `main.py`, CORS suma `http://localhost:5500` y `http://127.0.0.1:5500` (nunca
   `"*"`). Todo esto es scratch de prueba y se quita antes de producción.
+- **Sesión ARCA — COMPLETA.** Segundo agente (fuente cuitonline.com, scraping HTML),
+  mismo patrón de 4 capas que el BCRA, con su informe INDEPENDIENTE (el unificador los
+  cruza en la Sesión 9): `integrations/arca_client.py` (transporte httpx async que
+  aísla cuitonline §6.2; headers de browser real, timeout 15s, retry 3× backoff `1s·2^n`,
+  rate limit defensivo ≥1s entre requests al mismo host, `follow_redirects=True`;
+  `construir_url(cuit, razon_social)` arma la URL del detalle directamente
+  (`/detalle/{cuit}/{slug}.html`, slug url-friendly de la razón social: minúsculas, sin
+  acentos, espacios→guiones, sin otros símbolos) y `obtener_constancia` baja y parsea esa
+  URL; 404→None, 429/403→`ARCA_RATE_LIMITED` 503, 5xx/timeout/red→`ARCA_UNAVAILABLE` 503,
+  persona física→`ARCA_PERSONA_FISICA` 422), `integrations/arca_parser.py` (parseo extraído
+  por el límite de 100 líneas del client; el body del detalle está bajo paywall de adblocker,
+  así que los datos se leen SOLO de los meta tags: `<meta name="description">` —campos
+  separados por un punto medio que cuitonline sirve corrupto y llega como U+FFFD (el split
+  acepta U+FFFD y `·`): razón social, CUIT, tipo de persona, domicilio, localidad, fecha de
+  contrato, Ganancias/IVA por prefijo— y `<meta name="keywords">` —empleador y tipo de
+  persona—; calibrado contra datos reales, ej. CUIT 30549738644), `services/arca_service.py`
+  (`obtener_datos_arca(cuit, razon_social)` orquesta construir_url→constancia→normalizar;
+  detalle inexistente (404 → raw None) → `ARCA_CUIT_NOT_FOUND` 404), `services/arca_normalizer.py` (puro: razon_social
+  title-case, estado→activo/inactivo/dado_de_baja, es_empleador bool, fecha→ISO 8601 o None,
+  regimenes [{nombre, fecha_desde}], `nivel_alerta` alto/medio/bajo) y
+  `services/prompts/arca_analista.py` (system prompt experto fiscal/societario, 4 secciones,
+  máx 400 palabras, sin recomendar decisiones comerciales). El informe ARCA vive en
+  `services/report_arca.py` (`generar_informe_arca` + `validar_salida_arca`), NO en
+  `report_service.py` —que ya estaba en 149/150 líneas—, reutilizando su
+  `sanitizar_datos_entrada`. Cableado en `_ejecutar_pipeline` DESPUÉS del bloque BCRA con
+  caché propia (`TTL_ARCA`): ARCA es complementario y **degrada sin tumbar el job** (si falta
+  la razón social, o la fuente/el redactor caen, el informe BCRA se conserva y ARCA queda en
+  None con el error anotado). Como la URL de ARCA necesita la razón social, el bloque la exige:
+  si `job.razon_social` es None/vacía degrada con `ARCA_NO_RAZON_SOCIAL` sin consultar la
+  fuente. El resultado del job es `{cuit, denominacion, datos_bcra, informe_bcra,
+  fuente_cache_bcra, datos_arca, informe_arca, fuente_cache_arca, arca_error}`. Se pinea
+  `beautifulsoup4==4.12.3` (§7.1) + tests (test_arca_service: service mockeado + slug de
+  `construir_url` + 2 de parser contra el meta real de CRISTEM; test_job_service: degradado
+  por fuente caída y por razón social ausente). Suite total 62/62.
+  - **Corrección post-prueba real (Sesión ARCA.1):** la prueba contra cuitonline reveló
+    que `/search.html?q={cuit}` daba 404 (no existe) y que el body del detalle está
+    bloqueado por paywall. Se reemplazó la búsqueda por el redirect de `/constancia/{cuit}`
+    y el parseo del body por el de meta tags; se eliminó `extraer_url_resultado`.
+  - **Corrección post-prueba real (Sesión ARCA.2):** `/constancia/{cuit}` también daba 404.
+    Se eliminó `buscar_cuit` y se reemplazó por `construir_url(cuit, razon_social)`, que arma
+    `/detalle/{cuit}/{slug}.html` directamente desde la razón social (sin request previo).
+    `obtener_datos_arca` pasa a requerir `razon_social`; `ARCA_NO_DATA` desaparece (raw None
+    ahora → `ARCA_CUIT_NOT_FOUND`) y el job degrada con `ARCA_NO_RAZON_SOCIAL` si no hay razón
+    social. Detalle en CHANGELOG.
+  - **Corrección post-prueba real (Sesión ARCA.3):** el parser no separaba los campos:
+    cuitonline sirve el separador `·` corrupto (bytes EF BF BD), que al decodificar UTF-8
+    llega como U+FFFD y es irrecuperable desde los bytes, así que `split(" · ")` dejaba todo
+    el string en `razon_social`. El split pasa a un regex que acepta U+FFFD (lo real) y `·`
+    (fallback), armado con `chr()` para no meter caracteres no-ASCII en el fuente. Además se
+    propaga `localidad` en `arca_normalizer.normalizar` (antes se descartaba) — excepción
+    autorizada a la restricción de archivos. Fixture del test reconstruida con el separador
+    real (U+FFFD). Detalle en CHANGELOG.
 
-**Pendiente:** conectar ARCA, persistencia real
-(`SupabaseJobRepository`/`SupabaseUserRepository`), rate limiting, migraciones SQL
-con RLS, más tests del flujo de informe. Ver `ARCHITECTURE.md` para la deuda técnica.
+**Pendiente:** persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`),
+rate limiting, migraciones SQL con RLS, más tests del flujo de informe, **unificador
+BCRA+ARCA (Sesión 9)**. Ver `ARCHITECTURE.md` para la deuda técnica.
+
+**Deuda técnica detectada en la Sesión ARCA:**
+- **Parser de cuitonline ahora desde meta tags (calibrado parcial):** tras la corrección
+  Sesión ARCA.1, `arca_parser.py` lee de `<meta name="description">` y `keywords`, con
+  tests contra el meta real de CRISTEM. Limita lo disponible: el meta NO trae
+  estado_inscripcion, regímenes ni actividad económica, así que esos campos quedan en
+  None/[] y `nivel_alerta` cae a "medio" por defecto. Falta validar con más empresas
+  (variaciones de orden/ausencia de campos en el description) y, si se necesitan los
+  campos faltantes, encontrar otra fuente (el body sigue bajo paywall).
+- **`construir_url` depende de que el slug coincida EXACTO con el de cuitonline:** el slug se
+  genera desde la razón social que envía el usuario; si difiere del que usa cuitonline (orden
+  de palabras, abreviaturas, puntuación atípica), la URL da 404 → ARCA_CUIT_NOT_FOUND aunque
+  la empresa exista. Validar el algoritmo de slug con un set amplio de empresas reales.
+- **`frontend_prueba/index.html` quedó desfasado:** lee `resultado.informe` y
+  `resultado.fuente_cache`, que pasaron a llamarse `informe_bcra`/`fuente_cache_bcra`. No
+  crashea (JS muestra vacío), pero no renderiza el informe ni el bloque ARCA. Es scratch
+  temporal (no se tocó por consigna); actualizar o descartar al armar el front real.
+- **Informe ARCA partido en `report_arca.py`:** la consigna pedía `generar_informe_arca`
+  dentro de `report_service.py`, pero ese archivo estaba en 149/150 líneas. Se movió a un
+  módulo propio (criterio: límite de líneas no negociable). Si más adelante se unifican los
+  redactores, conviene revisar esta separación.
+- **Scraping frágil por naturaleza:** cuitonline puede cambiar el HTML o endurecer el
+  anti-scraping (Cloudflare, captcha). El rate limit es global de proceso (`time.monotonic`
+  en memoria); con múltiples instancias/workers no se coordina entre procesos.
