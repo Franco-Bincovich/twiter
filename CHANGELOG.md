@@ -4,6 +4,53 @@ Formato basado en commits convencionales (ver ORDEN-Y-LEGIBILIDAD.md sección 8)
 
 ## [Sin publicar]
 
+### Added
+
+- Agente BORA (tercera fuente real): publicaciones en boletines oficiales + datos de dateas.com
+  (scraping HTML). Mismo patrón de 4 capas que ARCA, con informe **independiente** (el unificador
+  cruza BCRA+ARCA+BORA en la Sesión 9).
+  - `integrations/bora_client.py`: transporte httpx async (headers de browser, timeout 15s,
+    retry 3× backoff `1s·2^n`, rate limit ≥1s) idéntico en patrón a `arca_client`.
+    `construir_url(cuit, razon_social)` arma `/es/empresa/{slug}-{cuit}` y `obtener_datos`
+    descarga + delega el parseo. 404→None; 429/403→`BORA_RATE_LIMITED` 503;
+    5xx/timeout/red→`BORA_UNAVAILABLE` 503.
+  - `integrations/bora_parser.py`: BeautifulSoup. Tres bloques confirmados en prueba real:
+    dos `table.entity-table-vertical` (Datos Básicos y de Identificación; Información de ARCA),
+    leídas como filas th/td quitando links anidados ("Ver Informe Completo"); y
+    `div.search-result` por publicación (título, url absoluta, snippet, fecha dd/mm/aaaa→ISO y
+    sección parseadas del título, máx 10). Devuelve strings crudos.
+  - `services/bora_service.py`: `obtener_datos_bora(cuit, razon_social)`; página inexistente
+    (404 → raw None) → `BORA_CUIT_NOT_FOUND` 404.
+  - `services/bora_normalizer.py`: puro. razon_social title-case; ganancias/iva/monotributo
+    "Activo"/"Inactivo"/"No Inscripto" → activo/inactivo/no_inscripto; empleador "Si"→bool;
+    publicaciones ordenadas por fecha desc (máx 10); `nivel_alerta` = "alto" si hay
+    "concurso"/"quiebra" en título o snippet, "medio" si hay publicaciones, "bajo" si no;
+    `alertas_criticas` = las que dispararon "alto".
+  - `services/prompts/bora_analista.py`: system prompt experto en derecho societario y
+    boletines (4 secciones: situación societaria, alertas críticas, historial registral,
+    observaciones; máx 400 palabras; no recomienda decisiones ni inventa datos).
+  - `services/report_bora.py`: `generar_informe_bora` + `validar_salida_bora` (fuga de prompt,
+    recomendaciones de decisión y, como cross-check, rechaza afirmar concurso/quiebra si los
+    datos no traen `alertas_criticas`, con guard de negación para no frenar "no hay quiebra").
+  - `utils/slug.py` (nuevo): `generar_slug` compartido; lo usa `bora_client`. `arca_client`
+    mantiene su slug inline (no se tocó `arca_*` por restricción) — deuda anotada.
+  - `tests/test_bora_service.py`: 11 tests sin red (slug, service mockeado, normalizer
+    niveles/empleador, parser sobre HTML fixture con la estructura real de dateas).
+
+### Changed
+
+- `services/job_service.py` → pipeline extraído a `services/pipeline_service.py`: al sumar BORA,
+  `job_service` superaba 150 líneas, así que `_ejecutar_pipeline` se movió a
+  `pipeline_service.ejecutar_pipeline` (job_service solo gestiona el ciclo de vida del job y
+  delega). El pipeline resuelve BCRA (núcleo) y luego ARCA y BORA mediante un helper genérico
+  `_resolver_complementaria` (caché propia por fuente, degradación uniforme: `{FUENTE}_NO_RAZON_SOCIAL`
+  si falta razón social, o el error de la fuente, sin tumbar el job). El resultado del job suma
+  `datos_bora`, `informe_bora`, `fuente_cache_bora`, `bora_error` (`TTL_BORA`=7 días).
+  - `tests/test_job_service.py`: los mocks pasan a apuntar a `pipeline_service` (donde ahora
+    viven los services); se mockea BORA en los tests que llegan al bloque y se agrega
+    `test_pipeline_bora_sin_razon_social_degrada`. Suite total 73/73; validado end-to-end contra
+    dateas real (CUIT 30549738644: 3 publicaciones).
+
 ### Fixed
 
 - Agente ARCA — tercera corrección tras prueba real (Sesión ARCA.3): el parser no

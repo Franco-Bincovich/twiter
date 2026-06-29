@@ -193,10 +193,38 @@ Reglas no negociables:
     propaga `localidad` en `arca_normalizer.normalizar` (antes se descartaba) — excepción
     autorizada a la restricción de archivos. Fixture del test reconstruida con el separador
     real (U+FFFD). Detalle en CHANGELOG.
+- **Sesión BORA — COMPLETA.** Tercer agente (fuente dateas.com, scraping HTML), mismo patrón
+  de 4 capas que ARCA, informe INDEPENDIENTE: `integrations/bora_client.py` (transporte httpx
+  igual a ARCA; `construir_url(cuit, razon_social)` → `/es/empresa/{slug}-{cuit}` usando
+  `utils.slug.generar_slug`; `obtener_datos` baja y delega en el parser; 404→None,
+  429/403→`BORA_RATE_LIMITED` 503, 5xx/timeout→`BORA_UNAVAILABLE` 503),
+  `integrations/bora_parser.py` (BeautifulSoup; tres bloques confirmados con datos reales: dos
+  `table.entity-table-vertical` —Datos Básicos y ARCA, filas th/td, se remueven links como
+  "Ver Informe Completo"— y `div.search-result` por publicación —título, url, snippet, fecha
+  dd/mm/aaaa→ISO y sección parseadas del título, máx 10—; devuelve strings crudos),
+  `services/bora_service.py` (`obtener_datos_bora(cuit, razon_social)`; sin página (404 → raw
+  None) → `BORA_CUIT_NOT_FOUND` 404), `services/bora_normalizer.py` (puro: razon_social
+  title-case, ganancias/iva/monotributo "Activo/Inactivo/No Inscripto"→activo/inactivo/
+  no_inscripto, empleador "Si"→bool, publicaciones ordenadas por fecha desc máx 10,
+  `nivel_alerta` alto si hay "concurso"/"quiebra" en título o snippet, medio si hay
+  publicaciones, bajo si no; `alertas_criticas` = las que dispararon alto) y
+  `services/prompts/bora_analista.py` (experto societario/boletines, 4 secciones, máx 400
+  palabras, sin recomendar). Informe en `services/report_bora.py` (`generar_informe_bora` +
+  `validar_salida_bora` que además rechaza afirmar concurso/quiebra sin respaldo en los datos,
+  con guard anti-falsos-positivos por negación). Slug extraído a `utils/slug.py` (compartido;
+  ARCA conserva su copia inline por la restricción de no tocar `arca_*`). El pipeline se
+  **extrajo de `job_service` a `services/pipeline_service.py`** (job_service quedaba en 150/150):
+  `ejecutar_pipeline` resuelve BCRA (núcleo) y luego ARCA y BORA vía `_resolver_complementaria`
+  (helper genérico: caché propia, degrada con `{FUENTE}_NO_RAZON_SOCIAL` si falta razón social,
+  o con el error de la fuente, sin tumbar el job). El resultado suma `datos_bora`, `informe_bora`,
+  `fuente_cache_bora`, `bora_error` (`TTL_BORA`=7d). Tests: `test_bora_service` (11: slug,
+  service mockeado, normalizer niveles/empleador, parser sobre HTML fixture real) +
+  `test_job_service` migrado a mockear `pipeline_service` y caso `bora_sin_razon_social`.
+  Suite total 73/73. Validado end-to-end contra dateas real (CUIT 30549738644: 3 publicaciones).
 
 **Pendiente:** persistencia real (`SupabaseJobRepository`/`SupabaseUserRepository`),
 rate limiting, migraciones SQL con RLS, más tests del flujo de informe, **unificador
-BCRA+ARCA (Sesión 9)**. Ver `ARCHITECTURE.md` para la deuda técnica.
+BCRA+ARCA+BORA (Sesión 9)**. Ver `ARCHITECTURE.md` para la deuda técnica.
 
 **Deuda técnica detectada en la Sesión ARCA:**
 - **Parser de cuitonline ahora desde meta tags (calibrado parcial):** tras la corrección
@@ -218,6 +246,19 @@ BCRA+ARCA (Sesión 9)**. Ver `ARCHITECTURE.md` para la deuda técnica.
   dentro de `report_service.py`, pero ese archivo estaba en 149/150 líneas. Se movió a un
   módulo propio (criterio: límite de líneas no negociable). Si más adelante se unifican los
   redactores, conviene revisar esta separación.
-- **Scraping frágil por naturaleza:** cuitonline puede cambiar el HTML o endurecer el
+- **Scraping frágil por naturaleza:** cuitonline/dateas pueden cambiar el HTML o endurecer el
   anti-scraping (Cloudflare, captcha). El rate limit es global de proceso (`time.monotonic`
   en memoria); con múltiples instancias/workers no se coordina entre procesos.
+
+**Deuda técnica detectada en la Sesión BORA:**
+- **Slug duplicado:** `utils/slug.generar_slug` es la versión compartida (la usa `bora_client`),
+  pero `arca_client.construir_url` conserva su slug inline porque la consigna prohibía tocar
+  `arca_*`. Unificar ARCA sobre `utils/slug` cuando se pueda tocar ese archivo. Igual que ARCA,
+  `bora_client.construir_url` depende de que el slug coincida EXACTO con el de dateas.
+- **Parser de dateas por índice de tabla:** `bora_parser` asume tabla[0]=básicos, tabla[1]=ARCA
+  (hay exactamente dos `entity-table-vertical`). Si dateas agrega/reordena tablas, el mapeo se
+  rompe; convendría anclar cada tabla a su `<h2>`. Validado solo contra una empresa (CRISTEM).
+- **`validar_salida_bora` (no-inventar concurso/quiebra) es best-effort:** usa regex con guard
+  de negación `(?<!no )`; otras negaciones ("tampoco", "sin") podrían dar falsos positivos/negativos.
+- **`pipeline_service` cubierto solo vía `test_job_service`:** no tiene tests unitarios propios;
+  los casos del pipeline (incl. degradación ARCA/BORA) se ejercen a través de `procesar_job`.
